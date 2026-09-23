@@ -59,11 +59,54 @@ def parse_max_diff_chars(raw_value: str) -> int:
     return value
 
 
+def extract_json_object(raw: str) -> Any:
+    """Parse model output, tolerating code fences and surrounding prose."""
+    text = raw.strip()
+    fence_match = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    if fence_match:
+        text = fence_match.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    if start == -1:
+        raise ReviewError("The model returned no JSON object.")
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:index + 1])
+                except json.JSONDecodeError as exc:
+                    raise ReviewError(
+                        "The model returned invalid JSON; no grade was produced."
+                    ) from exc
+    raise ReviewError("The model returned invalid JSON; no grade was produced.")
+
+
 def validate_model_result(raw: str) -> dict[str, Any]:
     try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ReviewError("The model returned invalid JSON; no grade was produced.") from exc
+        result = extract_json_object(raw)
+    except ReviewError:
+        raise
 
     if not isinstance(result, dict):
         raise ReviewError("The model response must be a JSON object.")
@@ -158,12 +201,23 @@ def get_pull_request_files(token: str, repository: str, pr_number: int) -> list[
                 raise ReviewError("GitHub returned an invalid changed-file entry.")
             filename = item.get("filename")
             patch = item.get("patch")
-            if not isinstance(filename, str) or not isinstance(patch, str):
-                raise ReviewError(
-                    "At least one changed file has no text patch (for example, a binary or oversized file); "
-                    "the review was stopped to avoid grading incomplete changes."
-                )
-            files.append({"filename": filename, "status": str(item.get("status", "modified")), "patch": patch})
+            status = str(item.get("status", "modified"))
+            if not isinstance(filename, str) or not filename:
+                raise ReviewError("GitHub returned an invalid changed-file entry.")
+            if not isinstance(patch, str):
+                # Files with no textual diff: pure renames, removed files, new empty files.
+                changes = item.get("changes")
+                if status in {"renamed", "removed"} or (
+                    isinstance(changes, int) and changes == 0
+                ):
+                    patch = ""
+                else:
+                    raise ReviewError(
+                        "At least one changed file has no text patch (for example, a binary "
+                        "or oversized file); the review was stopped to avoid grading "
+                        "incomplete changes."
+                    )
+            files.append({"filename": filename, "status": status, "patch": patch})
         if len(page_data) < 100:
             break
     else:
@@ -192,6 +246,12 @@ def get_rubric(token: str, repository: str, path: str, base_sha: str) -> str:
         raise ReviewError("The rubric must be a UTF-8 text file.") from exc
     if not rubric:
         raise ReviewError("The rubric file is empty.")
+    size = result.get("size")
+    if isinstance(size, int) and len(rubric.encode("utf-8")) < size:
+        raise ReviewError(
+            "The rubric file is too large and was truncated by the GitHub API; "
+            "reduce its size or split the rubric."
+        )
     return rubric
 
 
@@ -319,11 +379,11 @@ def run() -> int:
     base_sha = pull_request["base"]["sha"]
     rubric = get_rubric(token, repository, rubric_path, base_sha)
     files = get_pull_request_files(token, repository, pr_number)
-    diff_chars = len(json.dumps(files, ensure_ascii=False))
-    total_chars = diff_chars + len(rubric)
+    messages = build_messages(rubric, files)
+    total_chars = len(json.dumps(messages, ensure_ascii=False))
     if total_chars > max_diff_chars:
         raise ReviewError(
-            f"Rubric and diff contain {total_chars} characters, exceeding max-diff-chars="
+            f"The grading prompt contains {total_chars} characters, exceeding max-diff-chars="
             f"{max_diff_chars}; raise the limit or split the PR. Nothing was truncated."
         )
 
@@ -336,10 +396,10 @@ def run() -> int:
     try:
         response = client.chat.completions.create(
             model=model,
-            messages=build_messages(rubric, files),
+            messages=messages,
             response_format={"type": "json_object"},
             max_tokens=2500,
-            temperature=0.2,
+            temperature=0,
         )
     except Exception as exc:  # SDK/provider exceptions may differ by implementation.
         details = str(exc).replace(api_key, "[REDACTED]").replace("\r", " ").replace("\n", " ")

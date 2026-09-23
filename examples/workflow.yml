@@ -15,6 +15,9 @@ concurrency:
 
 jobs:
   review:
+    # Ограничьте запуск платного API-вызова только своими людьми, иначе любой
+    # автор форка сможет сжигать квоту провайдера, пушая PR и synchronize.
+    if: contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
     runs-on: ubuntu-latest
     steps:
       - name: Set up Python

@@ -1,6 +1,10 @@
 name: AI Assignment Review
 description: Review pull request diffs against a rubric in the base repository using an OpenAI-compatible API.
 
+branding:
+  icon: check-circle
+  color: green
+
 inputs:
   api-key:
     description: API key for the OpenAI-compatible provider.

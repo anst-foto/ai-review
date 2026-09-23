@@ -7,7 +7,9 @@ from unittest.mock import patch
 from src.review import (
     ReviewError,
     build_messages,
+    extract_json_object,
     get_pull_request_files,
+    get_rubric,
     markdown_escape,
     parse_max_diff_chars,
     parse_threshold,
@@ -79,12 +81,54 @@ class ModelResultTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ReviewError):
                 validate_model_result(raw)
 
+    def test_parses_fenced_and_padded_model_output(self):
+        base = json.dumps(self.valid_result(), ensure_ascii=False)
+        for wrapped in (
+            f"```json\n{base}\n```",
+            f"Вот результат:\n{base}\nНадеюсь, понятно.",
+            f"  {base}  ",
+        ):
+            with self.subTest(wrapped=wrapped):
+                result = validate_model_result(wrapped)
+                self.assertEqual(result["score"], 85.0)
+
+    def test_rejects_output_without_object(self):
+        with self.assertRaises(ReviewError):
+            extract_json_object('текст без json-объекта, просто "строка"')
+
 
 class GitHubApiTests(unittest.TestCase):
     def test_rejects_files_without_a_reviewable_patch(self):
         with patch("src.review.github_get", return_value=[{"filename": "image.png"}]):
             with self.assertRaisesRegex(ReviewError, "no text patch"):
                 get_pull_request_files("token", "owner/repo", 1)
+
+    def test_skips_renamed_and_empty_files_without_patch(self):
+        entries = [
+            {"filename": "old.py", "status": "renamed", "changes": 0},
+            {"filename": "empty.py", "status": "added", "changes": 0},
+            {"filename": "gone.py", "status": "removed", "changes": 0},
+            {"filename": "real.py", "status": "modified", "patch": "@@ -1 +1 @@\n-a\n+b\n", "changes": 1},
+        ]
+        with patch("src.review.github_get", return_value=entries):
+            files = get_pull_request_files("token", "owner/repo", 1)
+        self.assertEqual(len(files), 4)
+        self.assertEqual([f["patch"] for f in files[:3]], ["", "", ""])
+        self.assertNotEqual(files[3]["patch"], "")
+
+    def test_rejects_truncated_rubric(self):
+        import base64
+
+        full_text = "критерии " * 100
+        truncated = "критерии"
+        content = base64.b64encode(truncated.encode("utf-8")).decode("ascii")
+        with patch("src.review.github_get", return_value={
+            "encoding": "base64",
+            "content": content,
+            "size": len(full_text.encode("utf-8")),
+        }):
+            with self.assertRaisesRegex(ReviewError, "truncated"):
+                get_rubric("token", "owner/repo", ".github/rubric.md", "abc123")
 
 
 class OutputTests(unittest.TestCase):
