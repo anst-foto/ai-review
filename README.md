@@ -91,14 +91,15 @@ jobs:
 
       - name: Grade assignment
         id: grade
-        uses: anst-foto/ai-review@v1
+        uses: anst-foto/ai-review@057a4b6cd3d5ef85c7df4e1a856e5cf96c72f86a
         with:
           api-key: ${{ secrets.KODIK_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           rubric-path: .github/assignment-rubric.md
 ```
 
-В рабочей конфигурации замените `@v1` на полный commit SHA релиза (см. «Безопасность»).
+В примере Action закреплён по SHA релиза `v0.1`. Почему это безопаснее тега —
+см. «Безопасность».
 
 ## Входы
 
@@ -128,7 +129,7 @@ jobs:
 ```yaml
       - name: Grade assignment
         id: grade
-        uses: anst-foto/ai-review@<40-character-commit-SHA>
+        uses: anst-foto/ai-review@057a4b6cd3d5ef85c7df4e1a856e5cf96c72f86a
         with:
           api-key: ${{ secrets.KODIK_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -164,7 +165,7 @@ jobs:
 
       - name: Grade assignment
         id: grade
-        uses: anst-foto/ai-review@<40-character-commit-SHA>
+        uses: anst-foto/ai-review@057a4b6cd3d5ef85c7df4e1a856e5cf96c72f86a
         with:
           api-key: ${{ secrets.KODIK_API_KEY }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
