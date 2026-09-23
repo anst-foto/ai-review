@@ -1,0 +1,63 @@
+name: AI Assignment Review
+description: Review pull request diffs against a rubric in the base repository using an OpenAI-compatible API.
+
+inputs:
+  api-key:
+    description: API key for the OpenAI-compatible provider.
+    required: true
+  github-token:
+    description: GitHub token with contents:read and pull-requests:read permissions.
+    required: true
+  rubric-path:
+    description: Path to the grading rubric Markdown file in the pull request base branch.
+    required: true
+  model:
+    description: Model identifier understood by the configured API provider.
+    required: false
+    default: qwen/qwen3.8-27b:free
+  base-url:
+    description: OpenAI-compatible API base URL.
+    required: false
+    default: https://api.kodikrouter.ru/v1
+  passing-score:
+    description: Minimum score from 0 to 100 required to pass.
+    required: false
+    default: "70"
+  max-diff-chars:
+    description: Maximum combined rubric and diff size sent to the model; oversized reviews fail instead of truncating.
+    required: false
+    default: "50000"
+  pull-request-number:
+    description: Optional PR number override. Normally detected from the pull_request event payload.
+    required: false
+
+outputs:
+  score:
+    description: AI-assigned score from 0 to 100.
+    value: ${{ steps.review.outputs.score }}
+  passed:
+    description: Whether the review passed both the model's assessment and the configured score threshold.
+    value: ${{ steps.review.outputs.passed }}
+  summary:
+    description: Markdown review summary.
+    value: ${{ steps.review.outputs.summary }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Python dependency
+      shell: bash
+      run: python -m pip install --disable-pip-version-check --quiet -r "$GITHUB_ACTION_PATH/requirements.txt"
+    - name: Review pull request
+      id: review
+      shell: bash
+      env:
+        AI_REVIEW_API_KEY: ${{ inputs.api-key }}
+        AI_REVIEW_GITHUB_TOKEN: ${{ inputs.github-token }}
+        AI_REVIEW_RUBRIC_PATH: ${{ inputs.rubric-path }}
+        AI_REVIEW_MODEL: ${{ inputs.model }}
+        AI_REVIEW_BASE_URL: ${{ inputs.base-url }}
+        AI_REVIEW_PASSING_SCORE: ${{ inputs.passing-score }}
+        AI_REVIEW_MAX_DIFF_CHARS: ${{ inputs.max-diff-chars }}
+        AI_REVIEW_PR_NUMBER: ${{ inputs.pull-request-number }}
+      run: python "$GITHUB_ACTION_PATH/src/review.py"

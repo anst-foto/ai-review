@@ -1,0 +1,41 @@
+name: AI assignment review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Минимальные права: Action только читает PR и файл критериев через GitHub API.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      # Замените OWNER/ai-assignment-review и закрепите полный commit SHA релиза.
+      # Например: OWNER/ai-assignment-review@<40-character-commit-SHA>
+      - name: Grade assignment
+        id: grade
+        uses: OWNER/ai-assignment-review@<40-character-commit-SHA>
+        with:
+          api-key: ${{ secrets.KODIK_API_KEY }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          rubric-path: .github/assignment-rubric.md
+          model: qwen/qwen3.8-27b:free
+          base-url: https://api.kodikrouter.ru/v1
+          passing-score: "70"
+          max-diff-chars: "50000"
+
+      # При необходимости используйте outputs:
+      # - ${{ steps.grade.outputs.score }}
+      # - ${{ steps.grade.outputs.passed }}
